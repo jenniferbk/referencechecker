@@ -1,0 +1,16 @@
+[Unit]
+Description=Reference Checker API
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/referencechecker
+ExecStart=/usr/bin/node /home/ubuntu/referencechecker/dist/index.js
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+EnvironmentFile=/home/ubuntu/referencechecker/.env
+
+[Install]
+WantedBy=multi-user.target
