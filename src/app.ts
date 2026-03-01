@@ -5,6 +5,7 @@ import healthRouter from './routes/health.js';
 import referencesRouter from './routes/references.js';
 import creditsRouter from './routes/credits.js';
 import stripeRouter from './routes/stripe.js';
+import jobsRouter from './routes/jobs.js';
 
 const app = express();
 
@@ -27,6 +28,7 @@ app.use('/api', healthRouter);
 app.use('/api', referencesRouter);
 app.use('/api', creditsRouter);
 app.use('/api', stripeRouter);
+app.use('/api', jobsRouter);
 
 // Global error handler
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

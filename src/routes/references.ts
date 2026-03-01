@@ -3,6 +3,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import { verifyRateLimit } from '../middleware/rateLimit.js';
 import { verifyReference } from '../services/gemini.js';
 import { deductCredit, getCredits } from '../services/credits.js';
+import { supabase } from '../lib/supabase.js';
 
 const router = Router();
 
@@ -11,7 +12,7 @@ router.post(
   authMiddleware,
   verifyRateLimit,
   async (req: Request, res: Response) => {
-    const { reference } = req.body;
+    const { reference, job_id, reference_index } = req.body;
 
     if (!reference || typeof reference !== 'string' || reference.trim().length < 10) {
       res.status(400).json({ error: 'Invalid reference. Must be at least 10 characters.' });
@@ -24,6 +25,60 @@ router.post(
 
       // Call Gemini to verify
       const result = await verifyReference(reference.trim());
+
+      // If job_id provided, persist the result
+      if (job_id && typeof reference_index === 'number') {
+        try {
+          // Check if this reference_index already has a result (retry detection)
+          const { data: existing } = await supabase
+            .from('job_results')
+            .select('id')
+            .eq('job_id', job_id)
+            .eq('reference_index', reference_index)
+            .maybeSingle();
+
+          const isNewResult = !existing;
+
+          // Upsert the result (supports retries via unique constraint)
+          await supabase
+            .from('job_results')
+            .upsert({
+              job_id,
+              reference_index,
+              original: result.original,
+              status: result.status,
+              corrected: result.corrected || null,
+              notes: result.notes || null,
+            }, { onConflict: 'job_id,reference_index' });
+
+          // Only increment completed_count for genuinely new results
+          if (isNewResult) {
+            const { data: job } = await supabase
+              .from('jobs')
+              .select('total_references, completed_count')
+              .eq('id', job_id)
+              .single();
+
+            if (job) {
+              const newCount = job.completed_count + 1;
+              const updates: Record<string, any> = {
+                completed_count: newCount,
+                updated_at: new Date().toISOString(),
+              };
+              if (newCount >= job.total_references) {
+                updates.status = 'completed';
+              }
+              await supabase
+                .from('jobs')
+                .update(updates)
+                .eq('id', job_id);
+            }
+          }
+        } catch (persistError) {
+          // Log but don't fail the request — the verification itself succeeded
+          console.error('Failed to persist job result:', persistError);
+        }
+      }
 
       res.json({
         ...result,
