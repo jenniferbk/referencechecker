@@ -6,6 +6,7 @@ import referencesRouter from './routes/references.js';
 import creditsRouter from './routes/credits.js';
 import stripeRouter from './routes/stripe.js';
 import jobsRouter from './routes/jobs.js';
+import adminRouter from './routes/admin.js';
 
 const app = express();
 
@@ -29,6 +30,7 @@ app.use('/api', referencesRouter);
 app.use('/api', creditsRouter);
 app.use('/api', stripeRouter);
 app.use('/api', jobsRouter);
+app.use('/api', adminRouter);
 
 // Global error handler
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

@@ -10,6 +10,7 @@ export const config = {
   stripeSecretKey: process.env.STRIPE_SECRET_KEY || '',
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
   corsOrigin: process.env.CORS_ORIGIN || 'https://jenkleiman.com',
+  adminEmails: (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim()).filter(Boolean),
 };
 
 // Validate required config on startup

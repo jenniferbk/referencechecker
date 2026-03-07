@@ -4,6 +4,7 @@ import { verifyRateLimit } from '../middleware/rateLimit.js';
 import { verifyReference } from '../services/gemini.js';
 import { deductCredit, getCredits } from '../services/credits.js';
 import { supabase } from '../lib/supabase.js';
+import { logError } from '../services/logger.js';
 
 const router = Router();
 
@@ -113,7 +114,13 @@ router.post(
         return;
       }
 
-      console.error('Reference verification error:', error);
+      logError({
+        userId: req.userId,
+        endpoint: 'POST /api/verify-reference',
+        errorType: error.message === 'INSUFFICIENT_CREDITS' ? 'credit_error' : 'unknown_error',
+        message: error.message || 'Unknown error',
+        details: { reference: reference?.substring(0, 100) },
+      });
       res.status(500).json({ error: 'Failed to verify reference. Please try again.' });
     }
   }

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { supabase } from '../lib/supabase.js';
+import { logError } from '../services/logger.js';
 
 const router = Router();
 
@@ -45,7 +46,7 @@ router.post(
 
       res.json({ job_id: data.id, total: data.total_references });
     } catch (error: any) {
-      console.error('Create job error:', error);
+      logError({ userId: req.userId, endpoint: 'POST /api/jobs', errorType: 'job_error', message: error.message || 'Failed to create job' });
       res.status(500).json({ error: 'Failed to create job.' });
     }
   }
@@ -79,7 +80,7 @@ router.get(
 
       res.json({ jobs });
     } catch (error: any) {
-      console.error('List jobs error:', error);
+      logError({ userId: req.userId, endpoint: 'GET /api/jobs', errorType: 'job_error', message: error.message || 'Failed to list jobs' });
       res.status(500).json({ error: 'Failed to list jobs.' });
     }
   }
@@ -115,7 +116,7 @@ router.get(
 
       res.json({ job, results: results || [] });
     } catch (error: any) {
-      console.error('Get job error:', error);
+      logError({ userId: req.userId, endpoint: 'GET /api/jobs/:jobId', errorType: 'job_error', message: error.message || 'Failed to get job' });
       res.status(500).json({ error: 'Failed to get job.' });
     }
   }
@@ -171,7 +172,7 @@ router.post(
 
       res.json({ status });
     } catch (error: any) {
-      console.error('Update job status error:', error);
+      logError({ userId: req.userId, endpoint: 'POST /api/jobs/:jobId/status', errorType: 'job_error', message: error.message || 'Failed to update job status' });
       res.status(500).json({ error: 'Failed to update job status.' });
     }
   }

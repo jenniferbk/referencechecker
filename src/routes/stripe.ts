@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
 import { createCheckoutSession, constructWebhookEvent } from '../services/stripe.js';
 import { addCredits } from '../services/credits.js';
+import { logError } from '../services/logger.js';
 
 const router = Router();
 
@@ -24,7 +25,12 @@ router.post('/create-checkout', authMiddleware, async (req: Request, res: Respon
 
     res.json({ url });
   } catch (error: any) {
-    console.error('Checkout session error:', error);
+    logError({
+      userId: req.userId,
+      endpoint: 'POST /api/create-checkout',
+      errorType: 'stripe_error',
+      message: error.message || 'Checkout session failed',
+    });
     res.status(400).json({ error: error.message || 'Failed to create checkout session.' });
   }
 });
@@ -48,7 +54,12 @@ router.post('/stripe-webhook', async (req: Request, res: Response) => {
       const creditsAmount = parseInt(session.metadata?.credits_amount || '0', 10);
 
       if (!userId || !creditsAmount) {
-        console.error('Webhook missing metadata:', session.metadata);
+        logError({
+          endpoint: 'POST /api/stripe-webhook',
+          errorType: 'stripe_error',
+          message: 'Webhook missing metadata',
+          details: { metadata: session.metadata, sessionId: session.id },
+        });
         res.status(400).json({ error: 'Missing metadata in checkout session.' });
         return;
       }
@@ -59,7 +70,11 @@ router.post('/stripe-webhook', async (req: Request, res: Response) => {
 
     res.json({ received: true });
   } catch (error: any) {
-    console.error('Webhook error:', error);
+    logError({
+      endpoint: 'POST /api/stripe-webhook',
+      errorType: 'stripe_error',
+      message: error.message || 'Webhook processing failed',
+    });
     res.status(400).json({ error: `Webhook error: ${error.message}` });
   }
 });

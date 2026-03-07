@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { config } from '../config.js';
+import { logError } from './logger.js';
 
 export interface VerificationResult {
   original: string;
@@ -13,6 +14,40 @@ const genAI = new GoogleGenerativeAI(config.geminiApiKey);
 const MAX_RETRIES = 3;
 const INITIAL_BACKOFF_MS = 5000;
 
+// Global rate limiter for Gemini API calls.
+// Search grounding likely counts as multiple requests against the quota,
+// so we throttle conservatively. With a 25 RPM quota and grounding potentially
+// using 3-5x multiplier, we limit to ~8 effective RPM (one call every 8 seconds).
+const MIN_DELAY_MS = parseInt(process.env.GEMINI_MIN_DELAY_MS || '8000', 10);
+let lastCallTime = 0;
+const pendingQueue: Array<{ resolve: () => void }> = [];
+let processing = false;
+
+async function acquireSlot(): Promise<void> {
+  return new Promise<void>(resolve => {
+    pendingQueue.push({ resolve });
+    processQueue();
+  });
+}
+
+async function processQueue(): Promise<void> {
+  if (processing) return;
+  processing = true;
+
+  while (pendingQueue.length > 0) {
+    const now = Date.now();
+    const elapsed = now - lastCallTime;
+    if (elapsed < MIN_DELAY_MS) {
+      await sleep(MIN_DELAY_MS - elapsed);
+    }
+    lastCallTime = Date.now();
+    const next = pendingQueue.shift();
+    if (next) next.resolve();
+  }
+
+  processing = false;
+}
+
 function isQuotaError(error: any): boolean {
   const msg = error.message || '';
   return msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED');
@@ -23,6 +58,8 @@ async function sleep(ms: number): Promise<void> {
 }
 
 export async function verifyReference(reference: string): Promise<VerificationResult> {
+  // Wait for our turn in the global rate limiter
+  await acquireSlot();
   const model = genAI.getGenerativeModel({
     model: 'gemini-3-pro-preview',
     // @ts-ignore - googleSearch is valid but types might be missing
@@ -69,7 +106,12 @@ export async function verifyReference(reference: string): Promise<VerificationRe
         const jsonString = text.replace(/```json/g, '').replace(/```/g, '').trim();
         data = JSON.parse(jsonString);
       } catch {
-        console.warn('Failed to parse Gemini JSON response, falling back to unknown', text);
+        logError({
+        endpoint: 'gemini/verifyReference',
+        errorType: 'gemini_parse_error',
+        message: 'Failed to parse Gemini JSON response',
+        details: { reference: reference.substring(0, 100), rawText: text.substring(0, 500) },
+      });
         data = {
           status: 'unknown',
           corrected: '',
@@ -100,10 +142,16 @@ export async function verifyReference(reference: string): Promise<VerificationRe
   }
 
   // All retries failed
-  console.error('Gemini verification failed after retries', lastError);
+  const quotaFailed = isQuotaError(lastError);
+  logError({
+    endpoint: 'gemini/verifyReference',
+    errorType: quotaFailed ? 'gemini_quota' : 'gemini_error',
+    message: lastError.message || 'Unknown Gemini error',
+    details: { reference: reference.substring(0, 100), retries: MAX_RETRIES },
+  });
 
   let errorMessage = 'Error connecting to Gemini.';
-  if (isQuotaError(lastError)) {
+  if (quotaFailed) {
     errorMessage = 'Gemini API quota exhausted. Please try again later.';
   } else if (lastError.message?.includes('403') || lastError.message?.includes('PERMISSION_DENIED')) {
     errorMessage = 'Gemini API permission denied.';
