@@ -10,6 +10,18 @@ export interface VerificationResult {
 
 const genAI = new GoogleGenerativeAI(config.geminiApiKey);
 
+const MAX_RETRIES = 3;
+const INITIAL_BACKOFF_MS = 5000;
+
+function isQuotaError(error: any): boolean {
+  const msg = error.message || '';
+  return msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED');
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export async function verifyReference(reference: string): Promise<VerificationResult> {
   const model = genAI.getGenerativeModel({
     model: 'gemini-3-pro-preview',
@@ -44,48 +56,66 @@ export async function verifyReference(reference: string): Promise<VerificationRe
   }
   `;
 
-  try {
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const text = response.text();
+  let lastError: any;
 
-    let data;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const jsonString = text.replace(/```json/g, '').replace(/```/g, '').trim();
-      data = JSON.parse(jsonString);
-    } catch {
-      console.warn('Failed to parse Gemini JSON response, falling back to unknown', text);
-      data = {
-        status: 'unknown',
-        corrected: '',
-        notes: `Raw Response: ${text}`,
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      const text = response.text();
+
+      let data;
+      try {
+        const jsonString = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        data = JSON.parse(jsonString);
+      } catch {
+        console.warn('Failed to parse Gemini JSON response, falling back to unknown', text);
+        data = {
+          status: 'unknown',
+          corrected: '',
+          notes: `Raw Response: ${text}`,
+        };
+      }
+
+      return {
+        original: reference,
+        status: data.status || 'unknown',
+        corrected: data.corrected,
+        notes: data.notes,
       };
+    } catch (error: any) {
+      lastError = error;
+
+      // Retry on quota/rate limit errors with exponential backoff
+      if (isQuotaError(error) && attempt < MAX_RETRIES) {
+        const backoff = INITIAL_BACKOFF_MS * Math.pow(2, attempt);
+        console.warn(`Gemini quota hit, retrying in ${backoff}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        await sleep(backoff);
+        continue;
+      }
+
+      // Non-retryable error or retries exhausted
+      break;
     }
-
-    return {
-      original: reference,
-      status: data.status || 'unknown',
-      corrected: data.corrected,
-      notes: data.notes,
-    };
-  } catch (error: any) {
-    console.error('Gemini verification failed', error);
-
-    let errorMessage = 'Error connecting to Gemini.';
-    if (error.message?.includes('429') || error.message?.includes('quota') || error.message?.includes('RESOURCE_EXHAUSTED')) {
-      errorMessage = 'Gemini API quota exhausted. Please try again later.';
-    } else if (error.message?.includes('403') || error.message?.includes('PERMISSION_DENIED')) {
-      errorMessage = 'Gemini API permission denied.';
-    } else if (error.message?.includes('404') || error.message?.includes('NOT_FOUND')) {
-      errorMessage = 'Gemini model not found.';
-    } else {
-      errorMessage += ` Details: ${error.message || JSON.stringify(error)}`;
-    }
-
-    return {
-      original: reference,
-      status: 'unknown',
-      notes: errorMessage,
-    };
   }
+
+  // All retries failed
+  console.error('Gemini verification failed after retries', lastError);
+
+  let errorMessage = 'Error connecting to Gemini.';
+  if (isQuotaError(lastError)) {
+    errorMessage = 'Gemini API quota exhausted. Please try again later.';
+  } else if (lastError.message?.includes('403') || lastError.message?.includes('PERMISSION_DENIED')) {
+    errorMessage = 'Gemini API permission denied.';
+  } else if (lastError.message?.includes('404') || lastError.message?.includes('NOT_FOUND')) {
+    errorMessage = 'Gemini model not found.';
+  } else {
+    errorMessage += ` Details: ${lastError.message || JSON.stringify(lastError)}`;
+  }
+
+  return {
+    original: reference,
+    status: 'unknown',
+    notes: errorMessage,
+  };
 }

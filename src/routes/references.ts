@@ -20,11 +20,31 @@ router.post(
     }
 
     try {
-      // Deduct credit BEFORE calling Gemini
-      const creditsAfter = await deductCredit(req.userId!, reference);
+      // Check credits before calling Gemini (don't deduct yet)
+      const currentCredits = await getCredits(req.userId!);
+      if (currentCredits < 1) {
+        res.status(402).json({
+          error: 'Insufficient credits. Please purchase more credits to continue.',
+          credits_remaining: 0,
+        });
+        return;
+      }
 
       // Call Gemini to verify
       const result = await verifyReference(reference.trim());
+
+      // If Gemini failed (quota exhausted, API error, etc.), don't charge the user
+      if (result.status === 'unknown') {
+        const isQuotaError = result.notes?.includes('quota exhausted');
+        res.status(isQuotaError ? 429 : 502).json({
+          ...result,
+          credits_remaining: currentCredits,
+        });
+        return;
+      }
+
+      // Deduct credit AFTER successful Gemini call
+      const creditsAfter = await deductCredit(req.userId!, reference);
 
       // If job_id provided, persist the result
       if (job_id && typeof reference_index === 'number') {
