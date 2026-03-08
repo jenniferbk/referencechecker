@@ -11,6 +11,9 @@ export const config = {
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
   corsOrigin: process.env.CORS_ORIGIN || 'https://jenkleiman.com',
   adminEmails: (process.env.ADMIN_EMAILS || '').split(',').map(e => e.trim()).filter(Boolean),
+  smtpUser: process.env.SMTP_USER || '',
+  smtpPass: process.env.SMTP_PASS || '',
+  alertEmailTo: process.env.ALERT_EMAIL_TO || '',
 };
 
 // Validate required config on startup

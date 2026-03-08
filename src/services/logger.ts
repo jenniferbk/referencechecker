@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase.js';
+import { notifyError } from './notifier.js';
 
 type ErrorType =
   | 'gemini_quota'
@@ -31,6 +32,8 @@ export async function logError(entry: LogEntry): Promise<void> {
       message: entry.message,
       details: entry.details || null,
     });
+    // Send email notification (fire-and-forget)
+    notifyError(entry).catch(() => {});
   } catch (err) {
     // If logging itself fails, just console it — don't crash
     console.error('Failed to persist error log:', err);
