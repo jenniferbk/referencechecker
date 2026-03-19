@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
-import { createCheckoutSession, constructWebhookEvent } from '../services/stripe.js';
+import { createCheckoutSession, constructWebhookEvent, CREDIT_TIERS } from '../services/stripe.js';
 import { addCredits } from '../services/credits.js';
 import { logError } from '../services/logger.js';
 
@@ -51,7 +51,13 @@ router.post('/stripe-webhook', async (req: Request, res: Response) => {
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object as any;
       const userId = session.metadata?.user_id;
-      const creditsAmount = parseInt(session.metadata?.credits_amount || '0', 10);
+      let creditsAmount = parseInt(session.metadata?.credits_amount || '0', 10);
+
+      // Fallback: resolve credits from pack_id if credits_amount wasn't set
+      if (!creditsAmount && session.metadata?.pack_id) {
+        const tier = CREDIT_TIERS[session.metadata.pack_id];
+        if (tier) creditsAmount = tier.credits;
+      }
 
       if (!userId || !creditsAmount) {
         logError({
