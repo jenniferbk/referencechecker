@@ -50,6 +50,7 @@ router.post('/stripe-webhook', async (req: Request, res: Response) => {
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object as any;
+      const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       let userId = session.metadata?.user_id || session.client_reference_id;
       let creditsAmount = parseInt(session.metadata?.credits_amount || '0', 10);
 
@@ -59,29 +60,21 @@ router.post('/stripe-webhook', async (req: Request, res: Response) => {
         if (tier) creditsAmount = tier.credits;
       }
 
-      // If userId is missing or invalid, try to resolve from the Stripe customer
-      const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-      if (userId && !UUID_REGEX.test(userId) && session.customer) {
-        try {
-          const customer = await stripe.customers.retrieve(session.customer as string) as any;
-          const fullId = customer.metadata?.supabase_user_id;
-          if (fullId && UUID_REGEX.test(fullId)) {
-            console.log(`Recovered full user ID from Stripe customer: ${fullId} (metadata had: ${userId})`);
-            userId = fullId;
-          }
-        } catch (e) {
-          // Customer lookup failed, continue with original userId
-        }
+      // Skip events that aren't from this app (e.g. a11y site sharing the same Stripe account)
+      if (!userId || !UUID_REGEX.test(userId)) {
+        console.log(`Ignoring checkout session ${session.id} — not a refcheck event (user_id: ${userId || 'missing'})`);
+        res.json({ received: true });
+        return;
       }
 
-      if (!userId || !UUID_REGEX.test(userId) || !creditsAmount) {
+      if (!creditsAmount) {
         logError({
           endpoint: 'POST /api/stripe-webhook',
           errorType: 'stripe_error',
-          message: !userId ? 'Webhook missing metadata' : !UUID_REGEX.test(userId) ? `Invalid user_id format: ${userId}` : 'Missing credits amount',
-          details: { metadata: session.metadata, sessionId: session.id, customer: session.customer },
+          message: 'Checkout session missing credits amount',
+          details: { metadata: session.metadata, sessionId: session.id },
         });
-        res.status(400).json({ error: 'Missing or invalid metadata in checkout session.' });
+        res.status(400).json({ error: 'Missing credits amount in checkout session.' });
         return;
       }
 
