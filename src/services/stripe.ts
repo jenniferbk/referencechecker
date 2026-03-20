@@ -47,6 +47,7 @@ export async function createCheckoutSession(
 
   const session = await stripe.checkout.sessions.create({
     customer: customerId,
+    client_reference_id: userId,
     mode: 'payment',
     line_items: [{ price: tierConfig.priceId, quantity: 1 }],
     metadata: {

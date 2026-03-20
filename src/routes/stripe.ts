@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth.js';
-import { createCheckoutSession, constructWebhookEvent, CREDIT_TIERS } from '../services/stripe.js';
+import { stripe, createCheckoutSession, constructWebhookEvent, CREDIT_TIERS } from '../services/stripe.js';
 import { addCredits } from '../services/credits.js';
 import { logError } from '../services/logger.js';
 
@@ -50,7 +50,7 @@ router.post('/stripe-webhook', async (req: Request, res: Response) => {
 
     if (event.type === 'checkout.session.completed') {
       const session = event.data.object as any;
-      const userId = session.metadata?.user_id;
+      let userId = session.metadata?.user_id || session.client_reference_id;
       let creditsAmount = parseInt(session.metadata?.credits_amount || '0', 10);
 
       // Fallback: resolve credits from pack_id if credits_amount wasn't set
@@ -59,14 +59,29 @@ router.post('/stripe-webhook', async (req: Request, res: Response) => {
         if (tier) creditsAmount = tier.credits;
       }
 
-      if (!userId || !creditsAmount) {
+      // If userId is missing or invalid, try to resolve from the Stripe customer
+      const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (userId && !UUID_REGEX.test(userId) && session.customer) {
+        try {
+          const customer = await stripe.customers.retrieve(session.customer as string) as any;
+          const fullId = customer.metadata?.supabase_user_id;
+          if (fullId && UUID_REGEX.test(fullId)) {
+            console.log(`Recovered full user ID from Stripe customer: ${fullId} (metadata had: ${userId})`);
+            userId = fullId;
+          }
+        } catch (e) {
+          // Customer lookup failed, continue with original userId
+        }
+      }
+
+      if (!userId || !UUID_REGEX.test(userId) || !creditsAmount) {
         logError({
           endpoint: 'POST /api/stripe-webhook',
           errorType: 'stripe_error',
-          message: 'Webhook missing metadata',
-          details: { metadata: session.metadata, sessionId: session.id },
+          message: !userId ? 'Webhook missing metadata' : !UUID_REGEX.test(userId) ? `Invalid user_id format: ${userId}` : 'Missing credits amount',
+          details: { metadata: session.metadata, sessionId: session.id, customer: session.customer },
         });
-        res.status(400).json({ error: 'Missing metadata in checkout session.' });
+        res.status(400).json({ error: 'Missing or invalid metadata in checkout session.' });
         return;
       }
 
