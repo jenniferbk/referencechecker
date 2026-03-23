@@ -53,6 +53,23 @@ function isQuotaError(error: any): boolean {
   return msg.includes('429') || msg.includes('quota') || msg.includes('RESOURCE_EXHAUSTED');
 }
 
+function isRecitationError(error: any): boolean {
+  const msg = error.message || '';
+  return msg.includes('RECITATION');
+}
+
+function isRetryableError(error: any): boolean {
+  if (isQuotaError(error)) return true;
+  if (isRecitationError(error)) return false;
+  const msg = error.message || '';
+  return msg.includes('fetch failed') ||
+    msg.includes('ECONNRESET') ||
+    msg.includes('ETIMEDOUT') ||
+    msg.includes('socket hang up') ||
+    msg.includes('503') ||
+    msg.includes('UNAVAILABLE');
+}
+
 async function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -128,10 +145,20 @@ export async function verifyReference(reference: string): Promise<VerificationRe
     } catch (error: any) {
       lastError = error;
 
-      // Retry on quota/rate limit errors with exponential backoff
-      if (isQuotaError(error) && attempt < MAX_RETRIES) {
+      // RECITATION means Gemini refuses to output the citation verbatim.
+      // This is deterministic — retrying won't help.
+      if (isRecitationError(error)) {
+        return {
+          original: reference,
+          status: 'unknown',
+          notes: 'This reference could not be verified because the AI flagged it as protected content. Please verify it manually.',
+        };
+      }
+
+      // Retry on quota/rate limit and transient network errors with exponential backoff
+      if (isRetryableError(error) && attempt < MAX_RETRIES) {
         const backoff = INITIAL_BACKOFF_MS * Math.pow(2, attempt);
-        console.warn(`Gemini quota hit, retrying in ${backoff}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        console.warn(`Gemini error (${isQuotaError(error) ? 'quota' : 'network'}), retrying in ${backoff}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
         await sleep(backoff);
         continue;
       }
@@ -143,9 +170,10 @@ export async function verifyReference(reference: string): Promise<VerificationRe
 
   // All retries failed
   const quotaFailed = isQuotaError(lastError);
+  const networkFailed = !quotaFailed && isRetryableError(lastError);
   logError({
     endpoint: 'gemini/verifyReference',
-    errorType: quotaFailed ? 'gemini_quota' : 'gemini_error',
+    errorType: quotaFailed ? 'gemini_quota' : networkFailed ? 'gemini_network' : 'gemini_error',
     message: lastError.message || 'Unknown Gemini error',
     details: { reference: reference.substring(0, 100), retries: MAX_RETRIES },
   });
@@ -153,6 +181,8 @@ export async function verifyReference(reference: string): Promise<VerificationRe
   let errorMessage = 'Error connecting to Gemini.';
   if (quotaFailed) {
     errorMessage = 'Gemini API quota exhausted. Please try again later.';
+  } else if (networkFailed) {
+    errorMessage = 'Could not reach Gemini API after multiple attempts. Please try again.';
   } else if (lastError.message?.includes('403') || lastError.message?.includes('PERMISSION_DENIED')) {
     errorMessage = 'Gemini API permission denied.';
   } else if (lastError.message?.includes('404') || lastError.message?.includes('NOT_FOUND')) {

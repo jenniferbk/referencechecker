@@ -4,6 +4,7 @@ import { notifyError } from './notifier.js';
 type ErrorType =
   | 'gemini_quota'
   | 'gemini_error'
+  | 'gemini_network'
   | 'gemini_parse_error'
   | 'credit_error'
   | 'stripe_error'
