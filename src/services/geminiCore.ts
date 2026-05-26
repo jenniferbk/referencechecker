@@ -36,12 +36,17 @@ function minDelayMs(): number { return parseInt(process.env.GEMINI_MIN_DELAY_MS 
 function initialBackoffMs(): number { return parseInt(process.env.GEMINI_BACKOFF_MS || '5000', 10); }
 
 // Global rate limiter for Gemini API calls (shared across all calls in this process).
+// This queue is intentionally shared across ALL models so the single Gemini API quota
+// is respected regardless of which model is calling.
 let lastCallTime = 0;
 const pendingQueue: Array<{ resolve: () => void }> = [];
 let processing = false;
 
 async function acquireSlot(): Promise<void> {
-  return new Promise<void>(resolve => { pendingQueue.push({ resolve }); processQueue(); });
+  return new Promise<void>(resolve => {
+    pendingQueue.push({ resolve });
+    processQueue().catch(err => console.error('[geminiCore] processQueue error:', err));
+  });
 }
 
 async function processQueue(): Promise<void> {

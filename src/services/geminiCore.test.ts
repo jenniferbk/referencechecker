@@ -83,3 +83,14 @@ test('runVerification returns quota message after exhausting retries', async () 
   assert.equal(run.result.status, 'unknown');
   assert.match(run.result.notes || '', /quota exhausted/);
 });
+
+test('runVerification returns permission-denied message for 403', async () => {
+  process.env.GEMINI_MIN_DELAY_MS = '0';
+  process.env.GEMINI_BACKOFF_MS = '1';
+  const run = await runVerification({
+    apiKey: 'k', model: 'm', reference: 'ref',
+    generate: async () => { throw new Error('403 PERMISSION_DENIED'); },
+  });
+  assert.equal(run.result.status, 'unknown');
+  assert.match(run.result.notes || '', /permission denied/i);
+});
