@@ -78,7 +78,7 @@ export async function verifyReference(reference: string): Promise<VerificationRe
   // Wait for our turn in the global rate limiter
   await acquireSlot();
   const model = genAI.getGenerativeModel({
-    model: 'gemini-3-pro-preview',
+    model: 'gemini-3.1-pro-preview',
     // @ts-ignore - googleSearch is valid but types might be missing
     tools: [{ googleSearch: {} }],
     generationConfig: { responseMimeType: 'application/json' },
