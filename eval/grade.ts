@@ -5,7 +5,7 @@ const TRUTHS: Truth[] = ['verified', 'corrected', 'hallucinated'];
 const STATUSES: VerificationResult['status'][] = ['verified', 'corrected', 'hallucinated', 'unknown'];
 
 function normalize(s: string): string {
-  return (s || '').toLowerCase().replace(/[*]/g, '').replace(/\s+/g, ' ').trim();
+  return (s || '').toLowerCase().replace(/[*]/g, '').replace(/[–—]/g, '-').replace(/\s+/g, ' ').trim();
 }
 
 export function fixRestored(item: TestItem, corrected?: string): boolean {
@@ -18,7 +18,7 @@ export function fixRestored(item: TestItem, corrected?: string): boolean {
     }
     case 'volume': {
       const m = item.correctReference.match(/\*(\d+)\*/);
-      return m ? new RegExp(`\\b${m[1]}\\b`).test(fixed) : false;
+      return m ? new RegExp(`\\b${m[1]}\\b\\s*[(,]`).test(fixed) : false;
     }
     case 'pages': {
       const m = item.correctReference.match(/,\s*([\d–-]+)\.\s*https/);

@@ -33,6 +33,25 @@ test('gradeItem sets fixRestored only for corrected-predicted corrected items', 
   assert.equal(gradeItem(item, run('verified', correctApa)).fixRestored, false);
 });
 
+test('fixRestored detects a restored volume and ignores issue/page coincidences', () => {
+  const item: TestItem = { id: 'c2', reference: 'bad', truth: 'corrected', brokenField: 'volume', correctReference: correctApa };
+  assert.equal(fixRestored(item, 'Smith, J. (2021). A study. *Journal of Examples*, *18*(1), 40–52.'), true);
+  assert.equal(fixRestored(item, 'Smith, J. (2021). A study. *Journal of Examples*, *25*(3), 18–22.'), false);
+});
+
+test('fixRestored pages accepts hyphen or en-dash from the model', () => {
+  const item: TestItem = { id: 'c4', reference: 'bad', truth: 'corrected', brokenField: 'pages', correctReference: correctApa };
+  assert.equal(fixRestored(item, 'Smith, J. (2021). A study. *Journal of Examples*, *18*(1), 40-52.'), true);
+  assert.equal(fixRestored(item, 'Smith, J. (2021). A study. *Journal of Examples*, *18*(1), 40–52.'), true);
+  assert.equal(fixRestored(item, 'Smith, J. (2021). A study. *Journal of Examples*, *18*(1), 99-100.'), false);
+});
+
+test('fixRestored author detects a restored surname', () => {
+  const item: TestItem = { id: 'c3', reference: 'bad', truth: 'corrected', brokenField: 'author', correctReference: correctApa };
+  assert.equal(fixRestored(item, 'Smith, J. (2021). A study. *Journal of Examples*, *18*(1), 40–52.'), true);
+  assert.equal(fixRestored(item, 'Jones, J. (2021). A study. *Journal of Examples*, *18*(1), 40–52.'), false);
+});
+
 test('buildModelReport aggregates accuracy, confusion, false-accusations and misses', () => {
   const items = [
     gradeItem({ id: 'v0', reference: 'r', truth: 'verified' }, run('verified')),
