@@ -56,6 +56,14 @@ test('crossrefToApa uses n.d. when year is missing', () => {
   assert.doesNotMatch(out, /undefined/);
 });
 
+test('crossrefToApa decodes HTML entities in title and journal', () => {
+  const w = { ...sample, title: ['Sharks &amp; rays'], 'container-title': ['Maritime &amp; Ocean Affairs'] } as CrossrefWork;
+  const out = crossrefToApa(w);
+  assert.doesNotMatch(out, /&amp;/);
+  assert.match(out, /Sharks & rays/);
+  assert.match(out, /\*Maritime & Ocean Affairs\*/);
+});
+
 test('isComplete rejects works missing required fields', () => {
   assert.equal(isComplete(sample), true);
   assert.equal(isComplete({ ...sample, volume: undefined }), false);

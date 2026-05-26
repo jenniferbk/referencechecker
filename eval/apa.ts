@@ -33,11 +33,23 @@ export function formatPages(page?: string): string {
   return page.replace(/-+/g, '–');
 }
 
+export function decodeEntities(s: string): string {
+  return s
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&#39;/g, "'")
+    .replace(/&#(\d+);/g, (_m, n) => String.fromCodePoint(parseInt(n, 10)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_m, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&amp;/g, '&');
+}
+
 export function crossrefToApa(work: CrossrefWork): string {
   const authors = formatAuthors(work.author || []);
   const year = getYear(work);
-  const title = (work.title?.[0] || '').trim().replace(/\.+$/, '');
-  const journal = (work['container-title']?.[0] || '').trim();
+  const title = decodeEntities((work.title?.[0] || '').trim().replace(/\.+$/, ''));
+  const journal = decodeEntities((work['container-title']?.[0] || '').trim());
   const pages = formatPages(work.page);
   let volPart = work.volume ? `*${work.volume}*` : '';
   if (work.volume && work.issue) volPart = `*${work.volume}*(${work.issue})`;
