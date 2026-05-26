@@ -46,7 +46,7 @@ and carries zero production risk.
 |---|---|---|---|
 | Real, correctly formatted | 20 | `verified` | Pull real journal articles from CrossRef (complete author/title/journal/year/DOI), format to APA 7th via `crossrefToApa()`. |
 | Real, one introduced error | 20 | `corrected` | Take real articles, corrupt exactly one recorded field. Store `brokenField` + the correct citation. |
-| Fabricated | 20 | `hallucinated` | Synthesize invented author/title/journal/year/DOI. **Validate each against CrossRef to confirm zero hits** before accepting as a true negative. |
+| Fabricated | 20 | `hallucinated` | Synthesize invented author/title/journal/year and a syntactically valid but unregistered DOI. **Confirm the DOI returns 404 from the CrossRef DOI endpoint** (`/works/{doi}`) before accepting as a true negative. |
 
 **Corruption types** (one per corrected item, recorded so the grader knows what was
 broken): swap publication year, strip required italics, wrong volume number, misspell an
@@ -55,8 +55,17 @@ author surname, malformed page range.
 **Validity risk + mitigation:** the "verified" bucket only measures accuracy if *our* APA
 7th formatting is genuinely correct — otherwise a model that correctly flags our bad
 formatting gets scored as wrong. Therefore `crossrefToApa()` is the validity-critical
-component and gets thorough unit tests. Fabricated items are CrossRef-checked to avoid
-accidentally inventing a real paper.
+component and gets thorough unit tests. Two further notes:
+
+- *Title casing.* CrossRef sometimes stores article titles in title case; APA 7th wants
+  sentence case. Converting title→sentence case reliably is lossy (proper nouns). v1
+  preserves CrossRef's title casing verbatim and prefers records whose titles are already
+  sentence-case-like (heuristic selection). This is acceptable because the goal is an A/B
+  *comparison*: both models receive byte-identical inputs, so any systematic formatting
+  bias depresses both models' absolute scores equally and does not bias which model wins.
+- *Confirming fakes.* Proving a paper doesn't exist is not fully automatable. The reliable
+  automatic signal is the DOI 404 check above (real DOI → 200, fabricated → 404, verified).
+  Because `testset.json` is committed, the 20 fakes are also available for human review.
 
 ## Scope decision (YAGNI)
 
