@@ -42,8 +42,8 @@ export function crossrefToApa(work: CrossrefWork): string {
   let volPart = work.volume ? `*${work.volume}*` : '';
   if (work.volume && work.issue) volPart = `*${work.volume}*(${work.issue})`;
   const tail = `*${journal}*${volPart ? ', ' + volPart : ''}${pages ? ', ' + pages : ''}.`;
-  const out = `${authors} (${year}). ${title}. ${tail} https://doi.org/${work.DOI}`;
-  return out.replace(/\s+/g, ' ').trim();
+  const body = `${authors} (${year ?? 'n.d.'}). ${title}. ${tail}`.replace(/\s+/g, ' ').trim();
+  return `${body} https://doi.org/${work.DOI}`;
 }
 
 export function isComplete(work: CrossrefWork): boolean {

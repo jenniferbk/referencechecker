@@ -49,6 +49,13 @@ test('crossrefToApa renders a journal article with markdown italics', () => {
   );
 });
 
+test('crossrefToApa uses n.d. when year is missing', () => {
+  const noYear = { ...sample, published: undefined, issued: undefined } as CrossrefWork;
+  const out = crossrefToApa(noYear);
+  assert.match(out, /\(n\.d\.\)/);
+  assert.doesNotMatch(out, /undefined/);
+});
+
 test('isComplete rejects works missing required fields', () => {
   assert.equal(isComplete(sample), true);
   assert.equal(isComplete({ ...sample, volume: undefined }), false);
