@@ -87,8 +87,9 @@ export function isRetryableError(error: any): boolean {
   if (isQuotaError(error)) return true;
   if (isRecitationError(error)) return false;
   const msg = error?.message || '';
-  return msg.includes('fetch failed') || msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT')
-    || msg.includes('socket hang up') || msg.includes('503') || msg.includes('UNAVAILABLE');
+  return msg.includes('PARSE_ERROR') || msg.includes('fetch failed') || msg.includes('ECONNRESET')
+    || msg.includes('ETIMEDOUT') || msg.includes('socket hang up') || msg.includes('503')
+    || msg.includes('UNAVAILABLE');
 }
 export function sleep(ms: number): Promise<void> { return new Promise(r => setTimeout(r, ms)); }
 
@@ -120,19 +121,14 @@ export function buildPrompt(reference: string): string {
   `;
 }
 
-export function parseVerificationResponse(text: string, reference: string, logError?: LogFn): VerificationResult {
+export function parseVerificationResponse(text: string, reference: string): VerificationResult {
+  const jsonString = (text || '').replace(/```json/g, '').replace(/```/g, '').trim();
+  if (!jsonString) throw new Error('PARSE_ERROR: empty response');
   let data: any;
   try {
-    const jsonString = text.replace(/```json/g, '').replace(/```/g, '').trim();
     data = JSON.parse(jsonString);
   } catch {
-    logError?.({
-      endpoint: 'gemini/verifyReference',
-      errorType: 'gemini_parse_error',
-      message: 'Failed to parse Gemini JSON response',
-      details: { reference: reference.substring(0, 100), rawText: text.substring(0, 500) },
-    });
-    data = { status: 'unknown', corrected: '', notes: `Raw Response: ${text}` };
+    throw new Error('PARSE_ERROR: invalid JSON');
   }
   return { original: reference, status: data.status || 'unknown', corrected: data.corrected, notes: data.notes };
 }
@@ -166,11 +162,13 @@ export async function runVerification(opts: {
   const prompt = buildPrompt(reference);
   const started = Date.now();
   let lastError: any;
+  let lastRawText = '';
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
       const out = await generate({ apiKey, model, prompt });
-      const result = parseVerificationResponse(out.text, reference, logError);
+      lastRawText = out.text;
+      const result = parseVerificationResponse(out.text, reference);
       return { result, latencyMs: Date.now() - started, usage: out.usage };
     } catch (error: any) {
       lastError = error;
@@ -182,7 +180,8 @@ export async function runVerification(opts: {
       }
       if (isRetryableError(error) && attempt < MAX_RETRIES) {
         const backoff = initialBackoffMs() * Math.pow(2, attempt);
-        console.warn(`Gemini error (${isQuotaError(error) ? 'quota' : 'network'}), retrying in ${backoff}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+        const kind = isQuotaError(error) ? 'quota' : (error?.message || '').includes('PARSE_ERROR') ? 'parse' : 'network';
+        console.warn(`Gemini error (${kind}), retrying in ${backoff}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
         await sleep(backoff);
         continue;
       }
@@ -191,16 +190,18 @@ export async function runVerification(opts: {
   }
 
   const quotaFailed = isQuotaError(lastError);
-  const networkFailed = !quotaFailed && isRetryableError(lastError);
+  const parseFailed = (lastError?.message || '').includes('PARSE_ERROR');
+  const networkFailed = !quotaFailed && !parseFailed && isRetryableError(lastError);
   logError?.({
     endpoint: 'gemini/verifyReference',
-    errorType: quotaFailed ? 'gemini_quota' : networkFailed ? 'gemini_network' : 'gemini_error',
+    errorType: quotaFailed ? 'gemini_quota' : parseFailed ? 'gemini_parse_error' : networkFailed ? 'gemini_network' : 'gemini_error',
     message: lastError?.message || 'Unknown Gemini error',
-    details: { reference: reference.substring(0, 100), retries: MAX_RETRIES },
+    details: { reference: reference.substring(0, 100), retries: MAX_RETRIES, ...(parseFailed ? { rawText: lastRawText.substring(0, 500) } : {}) },
   });
 
   let errorMessage = 'Error connecting to Gemini.';
   if (quotaFailed) errorMessage = 'Gemini API quota exhausted. Please try again later.';
+  else if (parseFailed) errorMessage = 'The AI returned an unreadable response after multiple attempts. Please try again.';
   else if (networkFailed) errorMessage = 'Could not reach Gemini API after multiple attempts. Please try again.';
   else if (lastError?.message?.includes('403') || lastError?.message?.includes('PERMISSION_DENIED')) errorMessage = 'Gemini API permission denied.';
   else if (lastError?.message?.includes('404') || lastError?.message?.includes('NOT_FOUND')) errorMessage = 'Gemini model not found.';

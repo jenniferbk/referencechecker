@@ -24,11 +24,13 @@ test('parseVerificationResponse strips markdown fences', () => {
   assert.equal(r.status, 'corrected');
 });
 
-test('parseVerificationResponse falls back to unknown and logs on bad JSON', () => {
-  let logged = '';
-  const r = parseVerificationResponse('not json', 'ref', (e) => { logged = e.errorType; });
-  assert.equal(r.status, 'unknown');
-  assert.equal(logged, 'gemini_parse_error');
+test('parseVerificationResponse throws on an empty response', () => {
+  assert.throws(() => parseVerificationResponse('', 'ref'), /PARSE_ERROR/);
+  assert.throws(() => parseVerificationResponse('   ', 'ref'), /PARSE_ERROR/);
+});
+
+test('parseVerificationResponse throws on invalid JSON', () => {
+  assert.throws(() => parseVerificationResponse('not json', 'ref'), /PARSE_ERROR/);
 });
 
 test('error classifiers', () => {
@@ -37,6 +39,7 @@ test('error classifiers', () => {
   assert.equal(isRetryableError({ message: 'fetch failed' }), true);
   assert.equal(isRetryableError({ message: 'RECITATION' }), false);
   assert.equal(isRetryableError({ message: 'totally fatal' }), false);
+  assert.equal(isRetryableError({ message: 'PARSE_ERROR: invalid JSON' }), true);
 });
 
 test('runVerification returns result, latency, usage on success', async () => {
@@ -100,4 +103,42 @@ test('VERIFICATION_SCHEMA constrains status to the three real verdicts', () => {
   assert.deepEqual(props.status.enum, ['verified', 'corrected', 'hallucinated']);
   assert.equal(props.status.format, 'enum');
   assert.deepEqual((VERIFICATION_SCHEMA as any).required, ['status', 'notes']);
+});
+
+test('runVerification retries a parse failure then succeeds', async () => {
+  process.env.GEMINI_MIN_DELAY_MS = '0';
+  process.env.GEMINI_BACKOFF_MS = '1';
+  let calls = 0;
+  const run = await runVerification({
+    apiKey: 'k', model: 'm', reference: 'ref',
+    generate: async () => { calls++; if (calls === 1) return { text: 'garbage not json' }; return { text: '{"status":"verified"}' }; },
+  });
+  assert.equal(run.result.status, 'verified');
+  assert.equal(calls, 2);
+});
+
+test('runVerification retries an empty response then succeeds', async () => {
+  process.env.GEMINI_MIN_DELAY_MS = '0';
+  process.env.GEMINI_BACKOFF_MS = '1';
+  let calls = 0;
+  const run = await runVerification({
+    apiKey: 'k', model: 'm', reference: 'ref',
+    generate: async () => { calls++; if (calls === 1) return { text: '' }; return { text: '{"status":"verified"}' }; },
+  });
+  assert.equal(run.result.status, 'verified');
+  assert.equal(calls, 2);
+});
+
+test('runVerification returns unknown and logs gemini_parse_error after exhausting parse retries', async () => {
+  process.env.GEMINI_MIN_DELAY_MS = '0';
+  process.env.GEMINI_BACKOFF_MS = '1';
+  let logged = '';
+  const run = await runVerification({
+    apiKey: 'k', model: 'm', reference: 'ref',
+    logError: (e) => { logged = e.errorType; },
+    generate: async () => ({ text: 'still not json' }),
+  });
+  assert.equal(run.result.status, 'unknown');
+  assert.match(run.result.notes || '', /unreadable/i);
+  assert.equal(logged, 'gemini_parse_error');
 });
