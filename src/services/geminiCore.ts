@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenerativeAI, SchemaType, type ResponseSchema } from '@google/generative-ai';
 
 export interface VerificationResult {
   original: string;
@@ -29,6 +29,19 @@ export interface LogEntry {
   details?: Record<string, any>;
 }
 export type LogFn = (entry: LogEntry) => void;
+
+// Constrains the model to emit schema-valid JSON. 'unknown' is intentionally NOT a
+// permitted status — it is the harness's internal marker for an unparseable/failed call,
+// never a verdict the model should produce.
+export const VERIFICATION_SCHEMA: ResponseSchema = {
+  type: SchemaType.OBJECT,
+  properties: {
+    status: { type: SchemaType.STRING, format: 'enum', enum: ['verified', 'corrected', 'hallucinated'] },
+    corrected: { type: SchemaType.STRING },
+    notes: { type: SchemaType.STRING },
+  },
+  required: ['status', 'notes'],
+};
 
 const MAX_RETRIES = 3;
 
@@ -130,7 +143,7 @@ const defaultGenerate: GenerateFn = async ({ apiKey, model, prompt }) => {
     model,
     // @ts-ignore - googleSearch is valid but types might be missing
     tools: [{ googleSearch: {} }],
-    generationConfig: { responseMimeType: 'application/json' },
+    generationConfig: { responseMimeType: 'application/json', responseSchema: VERIFICATION_SCHEMA },
   });
   const result = await m.generateContent(prompt);
   const response = await result.response;

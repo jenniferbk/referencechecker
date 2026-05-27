@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   buildPrompt, parseVerificationResponse,
   isQuotaError, isRetryableError, isRecitationError,
-  runVerification,
+  runVerification, VERIFICATION_SCHEMA,
 } from './geminiCore.js';
 
 test('buildPrompt embeds the reference and APA instruction', () => {
@@ -93,4 +93,11 @@ test('runVerification returns permission-denied message for 403', async () => {
   });
   assert.equal(run.result.status, 'unknown');
   assert.match(run.result.notes || '', /permission denied/i);
+});
+
+test('VERIFICATION_SCHEMA constrains status to the three real verdicts', () => {
+  const props: any = (VERIFICATION_SCHEMA as any).properties;
+  assert.deepEqual(props.status.enum, ['verified', 'corrected', 'hallucinated']);
+  assert.equal(props.status.format, 'enum');
+  assert.deepEqual((VERIFICATION_SCHEMA as any).required, ['status', 'notes']);
 });
