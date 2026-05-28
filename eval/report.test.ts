@@ -4,7 +4,8 @@ import { renderTable, renderConsoleTable, renderMarkdown } from './report.js';
 import type { ModelReport } from './types.js';
 
 const rep: ModelReport = {
-  model: 'gemini-x', total: 2, correctCount: 1, overallAccuracy: 0.5,
+  model: 'gemini-x', total: 2, correctCount: 1, existenceCorrectCount: 1,
+  overallAccuracy: 0.5, overallExistenceAccuracy: 0.5, verifiedExistenceAccuracy: 1,
   perClass: {
     verified: { total: 1, correct: 1, accuracy: 1 },
     corrected: { total: 0, correct: 0, accuracy: 0 },
@@ -19,7 +20,7 @@ const rep: ModelReport = {
   correctedPredictedCount: 0, fixRestoredCount: 0, fixRestoredRate: 0,
   avgLatencyMs: 120, totalTokens: 100,
   items: [
-    { itemId: 'h0', truth: 'hallucinated', predictedStatus: 'verified', correct: false, latencyMs: 120, totalTokens: 50, reference: 'fake ref', corrected: 'x', notes: 'looks real' },
+    { itemId: 'h0', truth: 'hallucinated', predictedStatus: 'verified', correct: false, existenceCorrect: false, latencyMs: 120, totalTokens: 50, reference: 'fake ref', corrected: 'x', notes: 'looks real' },
   ],
 };
 
@@ -28,10 +29,12 @@ test('renderTable aligns columns', () => {
   assert.match(out, /\| a   \| bb \|/);
 });
 
-test('renderConsoleTable includes the model and overall accuracy', () => {
+test('renderConsoleTable includes both overall scores and verified existence', () => {
   const out = renderConsoleTable([rep]);
   assert.match(out, /gemini-x/);
-  assert.match(out, /50\.0%/);
+  assert.match(out, /overall\(exist\)/);
+  assert.match(out, /overall\(strict\)/);
+  assert.match(out, /verified\(exist\)/);
 });
 
 test('renderMarkdown includes a disagreement appendix entry for wrong items', () => {
@@ -39,4 +42,9 @@ test('renderMarkdown includes a disagreement appendix entry for wrong items', ()
   assert.match(md, /# Model A\/B Accuracy Report/);
   assert.match(md, /h0/);          // the mis-graded item id
   assert.match(md, /fake ref/);    // its reference text appears for eyeballing
+});
+
+test('renderMarkdown includes the existence recognition bullet', () => {
+  const md = renderMarkdown([rep]);
+  assert.match(md, /Existence recognition/);
 });

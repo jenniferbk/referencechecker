@@ -16,10 +16,18 @@ export function renderTable(header: string[], rows: string[][]): string {
 }
 
 export function renderConsoleTable(reports: ModelReport[]): string {
-  const header = ['model', 'overall', 'verified', 'corrected', 'hallucinated', 'fix✓(approx)', 'unknown', 'false-acc', 'misses', 'avg-lat', 'tokens'];
+  const header = [
+    'model',
+    'overall(exist)', 'overall(strict)',
+    'verified(exist)', 'verified(strict)',
+    'corrected', 'hallucinated',
+    'fix✓(approx)', 'unknown', 'false-acc', 'misses', 'avg-lat', 'tokens',
+  ];
   const rows = reports.map(r => [
-    r.model, pct(r.overallAccuracy),
-    pct(r.perClass.verified.accuracy), pct(r.perClass.corrected.accuracy), pct(r.perClass.hallucinated.accuracy),
+    r.model,
+    pct(r.overallExistenceAccuracy), pct(r.overallAccuracy),
+    pct(r.verifiedExistenceAccuracy), pct(r.perClass.verified.accuracy),
+    pct(r.perClass.corrected.accuracy), pct(r.perClass.hallucinated.accuracy),
     pct(r.fixRestoredRate), String(r.unknownCount), String(r.falseAccusations), String(r.misses),
     Math.round(r.avgLatencyMs) + 'ms', String(r.totalTokens),
   ]);
@@ -39,7 +47,8 @@ export function renderMarkdown(reports: ModelReport[]): string {
   lines.push('## Summary', '', renderConsoleTable(reports), '');
   for (const r of reports) {
     lines.push(`## ${r.model}`, '');
-    lines.push(`- Overall accuracy: **${pct(r.overallAccuracy)}** (${r.correctCount}/${r.total})`);
+    lines.push(`- Overall accuracy (strict): **${pct(r.overallAccuracy)}** (${r.correctCount}/${r.total})`);
+    lines.push(`- Existence recognition (verified or corrected on real sources): **${pct(r.overallExistenceAccuracy)}** (${r.existenceCorrectCount}/${r.total})`);
     lines.push(`- False accusations (real → flagged fake): **${r.falseAccusations}**`);
     lines.push(`- Misses (fake → passed as verified): **${r.misses}**`);
     lines.push(`- Fix restored (approx, among corrected-caught): ${r.fixRestoredCount}/${r.correctedPredictedCount}`);
