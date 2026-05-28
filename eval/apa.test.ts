@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   initials, formatAuthors, getYear, formatPages,
   crossrefToApa, isComplete, isSentenceCaseLike, type CrossrefWork,
+  titleCaseSurname, titleCaseJournal, cleanVolume,
 } from './apa.js';
 
 test('initials reduces given names to spaced initials', () => {
@@ -72,4 +73,47 @@ test('isComplete rejects works missing required fields', () => {
 test('isSentenceCaseLike distinguishes title case from sentence case', () => {
   assert.equal(isSentenceCaseLike('A study of neural things'), true);
   assert.equal(isSentenceCaseLike('A Study Of Neural Things In The Brain'), false);
+});
+
+test('titleCaseSurname converts ALL-CAPS surnames and leaves mixed case alone', () => {
+  assert.equal(titleCaseSurname('MORRIS'), 'Morris');
+  assert.equal(titleCaseSurname('VAN DER BERG'), 'Van Der Berg');
+  assert.equal(titleCaseSurname('SMITH-JONES'), 'Smith-Jones');
+  assert.equal(titleCaseSurname('Morris'), 'Morris');
+  assert.equal(titleCaseSurname('McDonald'), 'McDonald');
+});
+
+test('titleCaseJournal title-cases long all-caps names but leaves acronym journals alone', () => {
+  assert.equal(titleCaseJournal('JOURNAL OF APPLIED ECOLOGY'), 'Journal of Applied Ecology');
+  assert.equal(titleCaseJournal('PLOS ONE'), 'PLOS ONE');
+  assert.equal(titleCaseJournal('JAMA'), 'JAMA');
+  assert.equal(titleCaseJournal('BMJ'), 'BMJ');
+  assert.equal(titleCaseJournal('Journal of Applied Ecology'), 'Journal of Applied Ecology');
+});
+
+test('cleanVolume strips No/Vol prefixes', () => {
+  assert.equal(cleanVolume('No 26'), '26');
+  assert.equal(cleanVolume('No. 26'), '26');
+  assert.equal(cleanVolume('Vol 8'), '8');
+  assert.equal(cleanVolume('Vol. 8'), '8');
+  assert.equal(cleanVolume('vol 12'), '12');
+  assert.equal(cleanVolume('26'), '26');
+  assert.equal(cleanVolume(undefined), undefined);
+});
+
+test('crossrefToApa applies the formatter cleanups end-to-end', () => {
+  const dirty: CrossrefWork = {
+    DOI: '10.1/x',
+    title: ['A study of things'],
+    author: [{ family: 'MORRIS', given: 'A.' }, { family: 'Lee', given: 'Bo' }],
+    'container-title': ['JOURNAL OF APPLIED ECOLOGY'],
+    volume: 'No 26',
+    issue: '1',
+    page: '40-52',
+    published: { 'date-parts': [[2021]] },
+  };
+  assert.equal(
+    crossrefToApa(dirty),
+    'Morris, A., & Lee, B. (2021). A study of things. *Journal of Applied Ecology*, *26*(1), 40–52. https://doi.org/10.1/x'
+  );
 });

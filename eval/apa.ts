@@ -16,7 +16,10 @@ export function initials(given: string): string {
 }
 
 export function formatAuthors(authors: CrossrefAuthor[]): string {
-  const names = authors.filter(a => a.family).map(a => a.given ? `${a.family}, ${initials(a.given)}` : `${a.family}`);
+  const names = authors.filter(a => a.family).map(a => {
+    const fam = titleCaseSurname(a.family as string);
+    return a.given ? `${fam}, ${initials(a.given)}` : fam;
+  });
   if (names.length === 0) return '';
   if (names.length === 1) return names[0];
   if (names.length <= 20) return names.slice(0, -1).join(', ') + ', & ' + names[names.length - 1];
@@ -45,14 +48,46 @@ export function decodeEntities(s: string): string {
     .replace(/&amp;/g, '&');
 }
 
+const JOURNAL_MINOR_WORDS = new Set([
+  'a','an','and','as','at','but','by','for','in','of','on','or','the','to','vs',
+]);
+
+export function titleCaseSurname(family: string): string {
+  // Only transform when the WHOLE surname is uppercase letters (and separators).
+  // Mixed-case names ('Morris', 'McDonald') are returned unchanged.
+  if (!/^[\p{Lu}][\p{Lu} '\-]*$/u.test(family)) return family;
+  return family.toLowerCase().replace(/(^|[\s'\-])(\p{Ll})/gu, (_m, sep, ch) => sep + (ch as string).toUpperCase());
+}
+
+export function titleCaseJournal(journal: string): string {
+  // Conservative heuristic: title-case only when the journal is ALL CAPS AND
+  // multi-word AND contains at least one token longer than 4 characters.
+  // Leaves acronym journals (PLOS ONE, JAMA, BMJ) alone.
+  if (/\p{Ll}/u.test(journal)) return journal;
+  const tokens = journal.trim().split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) return journal;
+  if (!tokens.some(t => t.length > 4)) return journal;
+  return tokens.map((t, i) => {
+    const lower = t.toLowerCase();
+    if (i > 0 && JOURNAL_MINOR_WORDS.has(lower)) return lower;
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+  }).join(' ');
+}
+
+export function cleanVolume(volume: string | undefined): string | undefined {
+  if (volume === undefined) return undefined;
+  return volume.replace(/^\s*(?:no|vol)\.?\s+/i, '').trim();
+}
+
 export function crossrefToApa(work: CrossrefWork): string {
   const authors = formatAuthors(work.author || []);
   const year = getYear(work);
   const title = decodeEntities((work.title?.[0] || '').trim().replace(/\.+$/, ''));
-  const journal = decodeEntities((work['container-title']?.[0] || '').trim());
+  const journal = titleCaseJournal(decodeEntities((work['container-title']?.[0] || '').trim()));
+  const volume = cleanVolume(work.volume);
   const pages = formatPages(work.page);
-  let volPart = work.volume ? `*${work.volume}*` : '';
-  if (work.volume && work.issue) volPart = `*${work.volume}*(${work.issue})`;
+  let volPart = volume ? `*${volume}*` : '';
+  if (volume && work.issue) volPart = `*${volume}*(${work.issue})`;
   const tail = `*${journal}*${volPart ? ', ' + volPart : ''}${pages ? ', ' + pages : ''}.`;
   const body = `${authors} (${year ?? 'n.d.'}). ${title}. ${tail}`.replace(/\s+/g, ' ').trim();
   return `${body} https://doi.org/${work.DOI}`;
