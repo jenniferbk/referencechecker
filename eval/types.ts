@@ -18,6 +18,7 @@ export interface ItemResult {
   brokenField?: string;
   predictedStatus: VerificationResult['status'];
   correct: boolean;
+  existenceCorrect: boolean;
   fixRestored?: boolean;
   latencyMs: number;
   totalTokens: number;
@@ -30,7 +31,10 @@ export interface ModelReport {
   model: string;
   total: number;
   correctCount: number;
+  existenceCorrectCount: number;
   overallAccuracy: number;
+  overallExistenceAccuracy: number;
+  verifiedExistenceAccuracy: number;
   perClass: Record<Truth, { total: number; correct: number; accuracy: number }>;
   confusion: Record<Truth, Record<VerificationResult['status'], number>>;
   falseAccusations: number;

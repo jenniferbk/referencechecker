@@ -68,3 +68,36 @@ test('buildModelReport aggregates accuracy, confusion, false-accusations and mis
   assert.equal(rep.confusion.verified.hallucinated, 1);
   assert.equal(rep.perClass.verified.total, 2);
 });
+
+test('gradeItem sets existenceCorrect for verified->verified and verified->corrected', () => {
+  const item: TestItem = { id: 'v0', reference: 'r', truth: 'verified' };
+  assert.equal(gradeItem(item, run('verified')).existenceCorrect, true);
+  assert.equal(gradeItem(item, run('corrected')).existenceCorrect, true);
+  assert.equal(gradeItem(item, run('hallucinated')).existenceCorrect, false);
+  assert.equal(gradeItem(item, run('unknown')).existenceCorrect, false);
+});
+
+test('existenceCorrect equals strict for corrected and hallucinated truth', () => {
+  const c: TestItem = { id: 'c0', reference: 'r', truth: 'corrected' };
+  assert.equal(gradeItem(c, run('corrected')).existenceCorrect, true);
+  assert.equal(gradeItem(c, run('verified')).existenceCorrect, false);
+  assert.equal(gradeItem(c, run('hallucinated')).existenceCorrect, false);
+
+  const h: TestItem = { id: 'h0', reference: 'r', truth: 'hallucinated' };
+  assert.equal(gradeItem(h, run('hallucinated')).existenceCorrect, true);
+  assert.equal(gradeItem(h, run('verified')).existenceCorrect, false);
+});
+
+test('buildModelReport computes overallExistenceAccuracy and verifiedExistenceAccuracy', () => {
+  const items = [
+    gradeItem({ id: 'v0', reference: 'r', truth: 'verified' }, run('verified')),
+    gradeItem({ id: 'v1', reference: 'r', truth: 'verified' }, run('corrected')),
+    gradeItem({ id: 'v2', reference: 'r', truth: 'verified' }, run('hallucinated')),
+    gradeItem({ id: 'h0', reference: 'r', truth: 'hallucinated' }, run('hallucinated')),
+  ];
+  const rep = buildModelReport('m', items);
+  assert.equal(rep.overallAccuracy, 2 / 4);
+  assert.equal(rep.overallExistenceAccuracy, 3 / 4);
+  assert.equal(rep.verifiedExistenceAccuracy, 2 / 3);
+  assert.equal(rep.existenceCorrectCount, 3);
+});

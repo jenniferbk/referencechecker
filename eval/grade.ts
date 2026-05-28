@@ -37,12 +37,14 @@ export function fixRestored(item: TestItem, corrected?: string): boolean {
 
 export function gradeItem(item: TestItem, run: RunResult): ItemResult {
   const predicted = run.result.status;
+  const correct = predicted === item.truth;
   const res: ItemResult = {
     itemId: item.id,
     truth: item.truth,
     brokenField: item.brokenField,
     predictedStatus: predicted,
-    correct: predicted === item.truth,
+    correct,
+    existenceCorrect: correct || (item.truth === 'verified' && predicted === 'corrected'),
     latencyMs: run.latencyMs,
     totalTokens: run.usage?.totalTokens ?? 0,
     reference: item.reference,
@@ -61,13 +63,16 @@ export function buildModelReport(model: string, items: ItemResult[]): ModelRepor
     TRUTHS.map(t => [t, Object.fromEntries(STATUSES.map(s => [s, 0]))]),
   ) as ModelReport['confusion'];
 
-  let correctCount = 0, unknownCount = 0, falseAccusations = 0, misses = 0;
+  let correctCount = 0, existenceCorrectCount = 0, verifiedExistenceCorrect = 0;
+  let unknownCount = 0, falseAccusations = 0, misses = 0;
   let totalTokens = 0, latencySum = 0, correctedPredictedCount = 0, fixRestoredCount = 0;
 
   for (const it of items) {
     perClass[it.truth].total++;
     confusion[it.truth][it.predictedStatus]++;
     if (it.correct) { correctCount++; perClass[it.truth].correct++; }
+    if (it.existenceCorrect) existenceCorrectCount++;
+    if (it.truth === 'verified' && it.existenceCorrect) verifiedExistenceCorrect++;
     if (it.predictedStatus === 'unknown') unknownCount++;
     if (it.truth === 'verified' && it.predictedStatus === 'hallucinated') falseAccusations++;
     if (it.truth === 'hallucinated' && it.predictedStatus === 'verified') misses++;
@@ -81,8 +86,10 @@ export function buildModelReport(model: string, items: ItemResult[]): ModelRepor
   for (const t of TRUTHS) perClass[t].accuracy = perClass[t].total ? perClass[t].correct / perClass[t].total : 0;
 
   return {
-    model, total: items.length, correctCount,
+    model, total: items.length, correctCount, existenceCorrectCount,
     overallAccuracy: items.length ? correctCount / items.length : 0,
+    overallExistenceAccuracy: items.length ? existenceCorrectCount / items.length : 0,
+    verifiedExistenceAccuracy: perClass.verified.total ? verifiedExistenceCorrect / perClass.verified.total : 0,
     perClass, confusion, falseAccusations, misses, unknownCount,
     correctedPredictedCount, fixRestoredCount,
     fixRestoredRate: correctedPredictedCount ? fixRestoredCount / correctedPredictedCount : 0,
