@@ -111,6 +111,7 @@ export function buildPrompt(reference: string): string {
      - If the user's input is perfect, mark status as 'verified'.
      - If there are errors (typos, punctuation, missing info${hasItalicMarkers(reference) ? ', wrong italics' : ''}), mark status as 'corrected' and provide the fixed version.
      - Adding italics to a plain-text reference is NOT a correction. If that is the only change, mark status as 'verified' and don't mention italics in the notes.
+     - Page and number ranges use an en dash (30–55), as APA 7th requires. Never replace an en dash with a hyphen, and don't count dash style as a correction.
   4. IMPORTANT: In the "corrected" field, use markdown formatting (*text*) for italics according to APA 7th Edition rules:
      - For journal articles: Italicize the journal title and volume number
      - For books: Italicize the book title
@@ -130,15 +131,29 @@ export function hasItalicMarkers(text: string): boolean {
   return /\*[^*]+\*/.test(text);
 }
 
-const stripItalics = (text: string) => text.replace(/\*/g, '').replace(/\s+/g, ' ').trim();
+// APA 7th uses an en dash for number ranges (pages, years). Only the text before a
+// DOI/URL is touched, since hyphens inside DOIs and URLs are significant.
+export function normalizeRangeDashes(text: string): string {
+  const linkStart = text.search(/https?:\/\/|doi:|www\./i);
+  const head = linkStart === -1 ? text : text.slice(0, linkStart);
+  const tail = linkStart === -1 ? '' : text.slice(linkStart);
+  return head.replace(/(\d)\s*[-\u2010-\u2014\u2212]\s*(\d)/g, '$1\u2013$2') + tail;
+}
 
-// Safety net for the prompt rule above: when the input carried no formatting, a
-// "correction" whose only difference is added italics is really a verified reference.
-export function downgradeItalicsOnlyCorrection(result: VerificationResult): VerificationResult {
-  if (result.status !== 'corrected' || !result.corrected) return result;
-  if (hasItalicMarkers(result.original)) return result;
-  if (stripItalics(result.corrected) !== stripItalics(result.original)) return result;
-  return { ...result, status: 'verified' };
+// Safety net for the prompt rules above: a "correction" that only changes dash style,
+// or only adds italics to a reference pasted without formatting, is really verified.
+export function downgradeCosmeticCorrection(result: VerificationResult): VerificationResult {
+  if (!result.corrected) return result;
+  const corrected = normalizeRangeDashes(result.corrected);
+  if (result.status !== 'corrected') return { ...result, corrected };
+
+  const ignoreItalics = !hasItalicMarkers(result.original);
+  const comparable = (text: string) => {
+    const t = normalizeRangeDashes(ignoreItalics ? text.replace(/\*/g, '') : text);
+    return t.replace(/\s+/g, ' ').trim();
+  };
+  const status = comparable(corrected) === comparable(result.original) ? 'verified' : 'corrected';
+  return { ...result, status, corrected };
 }
 
 export function parseVerificationResponse(text: string, reference: string): VerificationResult {
@@ -150,7 +165,7 @@ export function parseVerificationResponse(text: string, reference: string): Veri
   } catch {
     throw new Error('PARSE_ERROR: invalid JSON');
   }
-  return downgradeItalicsOnlyCorrection({ original: reference, status: data.status || 'unknown', corrected: data.corrected, notes: data.notes });
+  return downgradeCosmeticCorrection({ original: reference, status: data.status || 'unknown', corrected: data.corrected, notes: data.notes });
 }
 
 const defaultGenerate: GenerateFn = async ({ apiKey, model, prompt }) => {

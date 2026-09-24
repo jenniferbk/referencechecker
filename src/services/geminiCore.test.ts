@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildPrompt, parseVerificationResponse, hasItalicMarkers, downgradeItalicsOnlyCorrection,
+  buildPrompt, parseVerificationResponse, hasItalicMarkers, downgradeCosmeticCorrection, normalizeRangeDashes,
   isQuotaError, isRetryableError, isRecitationError,
   runVerification, VERIFICATION_SCHEMA,
 } from './geminiCore.js';
@@ -163,7 +163,7 @@ test('italics-only correction of a plain-text reference becomes verified', () =>
 });
 
 test('whitespace differences alone do not keep it corrected', () => {
-  const r = downgradeItalicsOnlyCorrection({ original: PLAIN.replace('Title. ', 'Title.  '), status: 'corrected', corrected: ITALIC });
+  const r = downgradeCosmeticCorrection({ original: PLAIN.replace('Title. ', 'Title.  '), status: 'corrected', corrected: ITALIC });
   assert.equal(r.status, 'verified');
 });
 
@@ -175,6 +175,35 @@ test('real content changes stay corrected even for plain-text input', () => {
 
 test('italics fixes stay corrected when the user supplied italics', () => {
   const original = 'Smith, J. (2020). *Title*. Journal of Tech, 10(2), 100–110.';
-  const r = downgradeItalicsOnlyCorrection({ original, status: 'corrected', corrected: ITALIC });
+  const r = downgradeCosmeticCorrection({ original, status: 'corrected', corrected: ITALIC });
   assert.equal(r.status, 'corrected');
+});
+
+test('normalizeRangeDashes uses en dashes for ranges but leaves DOIs and URLs alone', () => {
+  assert.equal(
+    normalizeRangeDashes('A. (2018). T. *J*, *36*(1), 30-55. https://doi.org/10.1037/0022-0663.98.1.1'),
+    'A. (2018). T. *J*, *36*(1), 30–55. https://doi.org/10.1037/0022-0663.98.1.1',
+  );
+  assert.equal(normalizeRangeDashes('pp. 12 — 20. doi:10.1000/1-2'), 'pp. 12–20. doi:10.1000/1-2');
+});
+
+test('en dash turned into a hyphen is not a correction, and the en dash is restored', () => {
+  const original = 'Fonger, N. L. (2018). Title. Cognition and Instruction, 36(1), 30–55. https://doi.org/10.1080/07370008.2017.1392965';
+  const corrected = 'Fonger, N. L. (2018). Title. *Cognition and Instruction*, *36*(1), 30-55. https://doi.org/10.1080/07370008.2017.1392965';
+  const r = parseVerificationResponse(JSON.stringify({ status: 'corrected', corrected, notes: 'x' }), original);
+  assert.equal(r.status, 'verified');
+  assert.match(r.corrected!, /30–55/);
+});
+
+test('dash-only change is not a correction even when the user supplied italics', () => {
+  const r = downgradeCosmeticCorrection({ original: ITALIC.replace('100–110', '100-110'), status: 'corrected', corrected: ITALIC });
+  assert.equal(r.status, 'verified');
+});
+
+test('real changes alongside a dash swap stay corrected, with the en dash kept', () => {
+  const original = 'Fonger, N. L. (2018). Title. Journal, 36(1), 30–55.';
+  const corrected = 'Fonger, N. L., & Stephens, A. (2018). Title. *Journal*, *36*(1), 30-55.';
+  const r = downgradeCosmeticCorrection({ original, status: 'corrected', corrected });
+  assert.equal(r.status, 'corrected');
+  assert.match(r.corrected!, /30–55/);
 });
