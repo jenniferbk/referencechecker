@@ -100,12 +100,17 @@ export function buildPrompt(reference: string): string {
 
   Reference to check: "${reference}"
 
+  About italics in the input: ${hasItalicMarkers(reference)
+    ? 'the user\'s italics are marked with *asterisks*. Text without asterisks was NOT italicized.'
+    : 'this reference was pasted as plain text, so its italics (if any) were lost. Do NOT treat missing italics as an error.'}
+
   Instructions:
   1. Use Google Search to verify if this paper/book/source actually exists.
   2. If it does NOT exist (hallucinated), mark status as 'hallucinated'.
   3. If it DOES exist, check the APA 7th formatting.
      - If the user's input is perfect, mark status as 'verified'.
-     - If there are errors (typos, punctuation, italics, missing info), mark status as 'corrected' and provide the fixed version.
+     - If there are errors (typos, punctuation, missing info${hasItalicMarkers(reference) ? ', wrong italics' : ''}), mark status as 'corrected' and provide the fixed version.
+     - Adding italics to a plain-text reference is NOT a correction. If that is the only change, mark status as 'verified' and don't mention italics in the notes.
   4. IMPORTANT: In the "corrected" field, use markdown formatting (*text*) for italics according to APA 7th Edition rules:
      - For journal articles: Italicize the journal title and volume number
      - For books: Italicize the book title
@@ -121,6 +126,21 @@ export function buildPrompt(reference: string): string {
   `;
 }
 
+export function hasItalicMarkers(text: string): boolean {
+  return /\*[^*]+\*/.test(text);
+}
+
+const stripItalics = (text: string) => text.replace(/\*/g, '').replace(/\s+/g, ' ').trim();
+
+// Safety net for the prompt rule above: when the input carried no formatting, a
+// "correction" whose only difference is added italics is really a verified reference.
+export function downgradeItalicsOnlyCorrection(result: VerificationResult): VerificationResult {
+  if (result.status !== 'corrected' || !result.corrected) return result;
+  if (hasItalicMarkers(result.original)) return result;
+  if (stripItalics(result.corrected) !== stripItalics(result.original)) return result;
+  return { ...result, status: 'verified' };
+}
+
 export function parseVerificationResponse(text: string, reference: string): VerificationResult {
   const jsonString = (text || '').replace(/```json/g, '').replace(/```/g, '').trim();
   if (!jsonString) throw new Error('PARSE_ERROR: empty response');
@@ -130,7 +150,7 @@ export function parseVerificationResponse(text: string, reference: string): Veri
   } catch {
     throw new Error('PARSE_ERROR: invalid JSON');
   }
-  return { original: reference, status: data.status || 'unknown', corrected: data.corrected, notes: data.notes };
+  return downgradeItalicsOnlyCorrection({ original: reference, status: data.status || 'unknown', corrected: data.corrected, notes: data.notes });
 }
 
 const defaultGenerate: GenerateFn = async ({ apiKey, model, prompt }) => {

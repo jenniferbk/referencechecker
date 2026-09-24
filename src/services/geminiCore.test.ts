@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildPrompt, parseVerificationResponse,
+  buildPrompt, parseVerificationResponse, hasItalicMarkers, downgradeItalicsOnlyCorrection,
   isQuotaError, isRetryableError, isRecitationError,
   runVerification, VERIFICATION_SCHEMA,
 } from './geminiCore.js';
@@ -141,4 +141,40 @@ test('runVerification returns unknown and logs gemini_parse_error after exhausti
   assert.equal(run.result.status, 'unknown');
   assert.match(run.result.notes || '', /unreadable/i);
   assert.equal(logged, 'gemini_parse_error');
+});
+
+const PLAIN = 'Smith, J. (2020). Title. Journal of Tech, 10(2), 100–110.';
+const ITALIC = 'Smith, J. (2020). Title. *Journal of Tech*, *10*(2), 100–110.';
+
+test('hasItalicMarkers detects *markdown* italics', () => {
+  assert.equal(hasItalicMarkers(ITALIC), true);
+  assert.equal(hasItalicMarkers(PLAIN), false);
+});
+
+test('buildPrompt tells the model when italics were lost in a plain-text paste', () => {
+  assert.match(buildPrompt(PLAIN), /pasted as plain text/);
+  assert.match(buildPrompt(ITALIC), /marked with \*asterisks\*/);
+});
+
+test('italics-only correction of a plain-text reference becomes verified', () => {
+  const r = parseVerificationResponse(JSON.stringify({ status: 'corrected', corrected: ITALIC, notes: 'Applied italics.' }), PLAIN);
+  assert.equal(r.status, 'verified');
+  assert.equal(r.corrected, ITALIC);
+});
+
+test('whitespace differences alone do not keep it corrected', () => {
+  const r = downgradeItalicsOnlyCorrection({ original: PLAIN.replace('Title. ', 'Title.  '), status: 'corrected', corrected: ITALIC });
+  assert.equal(r.status, 'verified');
+});
+
+test('real content changes stay corrected even for plain-text input', () => {
+  const corrected = ITALIC.replace('Smith, J.', 'Smith, J. A.');
+  const r = parseVerificationResponse(JSON.stringify({ status: 'corrected', corrected, notes: 'Added initial.' }), PLAIN);
+  assert.equal(r.status, 'corrected');
+});
+
+test('italics fixes stay corrected when the user supplied italics', () => {
+  const original = 'Smith, J. (2020). *Title*. Journal of Tech, 10(2), 100–110.';
+  const r = downgradeItalicsOnlyCorrection({ original, status: 'corrected', corrected: ITALIC });
+  assert.equal(r.status, 'corrected');
 });
