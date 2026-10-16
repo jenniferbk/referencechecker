@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI, SchemaType, type ResponseSchema } from '@google/generative-ai';
+import { createLimiter } from './limiter.js';
 
 export interface VerificationResult {
   original: string;
@@ -45,36 +46,16 @@ export const VERIFICATION_SCHEMA: ResponseSchema = {
 
 const MAX_RETRIES = 3;
 
-function minDelayMs(): number { return parseInt(process.env.GEMINI_MIN_DELAY_MS || '8000', 10); }
+// Defaults suit the paid Gemini tier: up to 6 calls at once, starts spaced 250ms apart.
+// The old free-tier setting was one call at a time with an 8s gap (GEMINI_MAX_CONCURRENCY=1,
+// GEMINI_MIN_DELAY_MS=8000).
+function maxConcurrency(): number { return parseInt(process.env.GEMINI_MAX_CONCURRENCY || '6', 10); }
+function minDelayMs(): number { return parseInt(process.env.GEMINI_MIN_DELAY_MS || '250', 10); }
 function initialBackoffMs(): number { return parseInt(process.env.GEMINI_BACKOFF_MS || '5000', 10); }
 
-// Global rate limiter for Gemini API calls (shared across all calls in this process).
-// This queue is intentionally shared across ALL models so the single Gemini API quota
-// is respected regardless of which model is calling.
-let lastCallTime = 0;
-const pendingQueue: Array<{ resolve: () => void }> = [];
-let processing = false;
-
-async function acquireSlot(): Promise<void> {
-  return new Promise<void>(resolve => {
-    pendingQueue.push({ resolve });
-    processQueue().catch(err => console.error('[geminiCore] processQueue error:', err));
-  });
-}
-
-async function processQueue(): Promise<void> {
-  if (processing) return;
-  processing = true;
-  while (pendingQueue.length > 0) {
-    const elapsed = Date.now() - lastCallTime;
-    const delay = minDelayMs();
-    if (elapsed < delay) await sleep(delay - elapsed);
-    lastCallTime = Date.now();
-    const next = pendingQueue.shift();
-    if (next) next.resolve();
-  }
-  processing = false;
-}
+// Shared across ALL models and requests in this process so the single Gemini API quota
+// is respected regardless of who is calling.
+const geminiLimiter = createLimiter({ maxConcurrent: maxConcurrency, minGapMs: minDelayMs });
 
 export function isQuotaError(error: any): boolean {
   const msg = error?.message || '';
@@ -191,9 +172,14 @@ const defaultGenerate: GenerateFn = async ({ apiKey, model, prompt }) => {
 export async function runVerification(opts: {
   apiKey: string; model: string; reference: string; logError?: LogFn; generate?: GenerateFn;
 }): Promise<RunResult> {
+  return geminiLimiter.run(() => verifyWithRetries(opts));
+}
+
+async function verifyWithRetries(opts: {
+  apiKey: string; model: string; reference: string; logError?: LogFn; generate?: GenerateFn;
+}): Promise<RunResult> {
   const { apiKey, model, reference, logError } = opts;
   const generate = opts.generate || defaultGenerate;
-  await acquireSlot();
   const prompt = buildPrompt(reference);
   const started = Date.now();
   let lastError: any;

@@ -50,51 +50,17 @@ router.post(
       // If job_id provided, persist the result
       if (job_id && typeof reference_index === 'number') {
         try {
-          // Check if this reference_index already has a result (retry detection)
-          const { data: existing } = await supabase
-            .from('job_results')
-            .select('id')
-            .eq('job_id', job_id)
-            .eq('reference_index', reference_index)
-            .maybeSingle();
-
-          const isNewResult = !existing;
-
-          // Upsert the result (supports retries via unique constraint)
-          await supabase
-            .from('job_results')
-            .upsert({
-              job_id,
-              reference_index,
-              original: result.original,
-              status: result.status,
-              corrected: result.corrected || null,
-              notes: result.notes || null,
-            }, { onConflict: 'job_id,reference_index' });
-
-          // Only increment completed_count for genuinely new results
-          if (isNewResult) {
-            const { data: job } = await supabase
-              .from('jobs')
-              .select('total_references, completed_count')
-              .eq('id', job_id)
-              .single();
-
-            if (job) {
-              const newCount = job.completed_count + 1;
-              const updates: Record<string, any> = {
-                completed_count: newCount,
-                updated_at: new Date().toISOString(),
-              };
-              if (newCount >= job.total_references) {
-                updates.status = 'completed';
-              }
-              await supabase
-                .from('jobs')
-                .update(updates)
-                .eq('id', job_id);
-            }
-          }
+          // Atomic upsert + counter bump; safe when several results arrive at once
+          const { error: recordError } = await supabase.rpc('record_job_result', {
+            p_user_id: req.userId,
+            p_job_id: job_id,
+            p_reference_index: reference_index,
+            p_original: result.original,
+            p_status: result.status,
+            p_corrected: result.corrected || null,
+            p_notes: result.notes || null,
+          });
+          if (recordError) throw recordError;
         } catch (persistError) {
           // Log but don't fail the request — the verification itself succeeded
           console.error('Failed to persist job result:', persistError);
