@@ -2,14 +2,20 @@ import nodemailer from 'nodemailer';
 import { config } from '../config.js';
 import { supabase } from '../lib/supabase.js';
 
+// SMTP_HOST selects a transactional provider (e.g. smtp.resend.com, user "resend", pass = API key).
+// Without it this falls back to Gmail, which Google may flag for automated sending.
 const transporter = config.smtpUser
-  ? nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: config.smtpUser,
-        pass: config.smtpPass,
-      },
-    })
+  ? nodemailer.createTransport(config.smtpHost
+      ? {
+          host: config.smtpHost,
+          port: config.smtpPort,
+          secure: config.smtpPort === 465 || config.smtpPort === 2465, // implicit TLS; 587 uses STARTTLS
+          auth: { user: config.smtpUser, pass: config.smtpPass },
+        }
+      : {
+          service: 'gmail',
+          auth: { user: config.smtpUser, pass: config.smtpPass },
+        })
   : null;
 
 async function lookupUserEmail(userId: string): Promise<string> {
@@ -41,7 +47,7 @@ export async function notifyError(entry: {
       : 'none';
 
     await transporter.sendMail({
-      from: `"RefCheck Alerts" <${config.smtpUser}>`,
+      from: `"RefCheck Alerts" <${config.smtpFrom || config.smtpUser}>`,
       to: config.alertEmailTo,
       subject: `[RefCheck] ${entry.errorType}: ${entry.message.slice(0, 80)}`,
       text: [
