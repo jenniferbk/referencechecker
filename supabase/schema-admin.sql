@@ -19,4 +19,6 @@ CREATE INDEX idx_error_logs_created_at ON error_logs(created_at DESC);
 CREATE INDEX idx_error_logs_error_type ON error_logs(error_type);
 CREATE INDEX idx_error_logs_user_id ON error_logs(user_id);
 
--- No RLS — only accessed by the backend via service role
+-- RLS enabled, no policies — only accessed by the backend via service role
+-- (service role bypasses RLS; this prevents anonymous PostgREST access)
+ALTER TABLE error_logs ENABLE ROW LEVEL SECURITY;

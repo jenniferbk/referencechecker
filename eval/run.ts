@@ -11,8 +11,9 @@ import type { TestItem, ItemResult, ModelReport } from './types.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TESTSET = path.join(__dirname, 'testset.json');
 
-// Add 'gemini-3.5-pro' here when Google publishes its model ID.
-const MODELS = ['gemini-3.1-pro-preview', 'gemini-3.5-flash'];
+// Override with EVAL_MODELS=a,b,c. IDs confirmed against the live models list on 2026-10-16.
+const DEFAULT_MODELS = ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.8-flash', 'gemini-4-argon', 'gemini-3.5-flash-lite'];
+const MODELS = process.env.EVAL_MODELS ? process.env.EVAL_MODELS.split(',').map(m => m.trim()).filter(Boolean) : DEFAULT_MODELS;
 
 async function loadTestset(): Promise<TestItem[]> {
   if (!fs.existsSync(TESTSET)) {
@@ -28,20 +29,21 @@ async function main(): Promise<void> {
 
   const items = await loadTestset();
   console.log(`Loaded ${items.length} test items. Models: ${MODELS.join(', ')}`);
-  console.log(`Rate limit: ${process.env.GEMINI_MIN_DELAY_MS || '8000'}ms between calls.\n`);
+  console.log(`Concurrency: ${process.env.GEMINI_MAX_CONCURRENCY || '6'} at a time.\n`);
 
   const reports: ModelReport[] = [];
   for (const model of MODELS) {
     console.log(`=== ${model} ===`);
-    const results: ItemResult[] = [];
-    let i = 0;
-    for (const item of items) {
-      i++;
+    // Items run concurrently through the shared limiter (GEMINI_MAX_CONCURRENCY), the same
+    // way production handles them; per-item latency is still measured individually.
+    let done = 0;
+    const results: ItemResult[] = await Promise.all(items.map(async item => {
       const run = await runVerification({ apiKey, model, reference: item.reference });
       const graded = gradeItem(item, run);
-      results.push(graded);
-      console.log(`  [${i}/${items.length}] ${item.truth} -> ${graded.predictedStatus} ${graded.correct ? '✓' : '✗'}`);
-    }
+      done++;
+      console.log(`  [${done}/${items.length}] ${item.id} ${item.truth} -> ${graded.predictedStatus} ${graded.correct ? '✓' : '✗'}`);
+      return graded;
+    }));
     reports.push(buildModelReport(model, results));
     console.log('');
   }

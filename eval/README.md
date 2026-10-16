@@ -13,8 +13,9 @@ npm run eval              # run all models in MODELS over the test set
 ```
 
 Requires `GEMINI_API_KEY` in `.env` (or the shell environment). Calls use real
-API quota/money (not user credits). Set `GEMINI_MIN_DELAY_MS` to control the
-rate-limiter delay (default 8000ms; lower it for faster local runs).
+API quota/money (not user credits). Items run concurrently through the same
+limiter as production (`GEMINI_MAX_CONCURRENCY`, default 6). Pick models with
+`EVAL_MODELS=gemini-3.5-flash,gemini-3.8-flash npm run eval`.
 
 ## What it measures
 
@@ -26,7 +27,7 @@ rate-limiter delay (default 8000ms; lower it for faster local runs).
 
 ## Adding a model
 
-Edit `MODELS` in `eval/run.ts`. Add `gemini-3.5-pro` once Google publishes its ID.
+Edit `DEFAULT_MODELS` in `eval/run.ts`, or pass `EVAL_MODELS`.
 
 ## Files
 
